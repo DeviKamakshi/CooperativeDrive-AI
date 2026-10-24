@@ -315,3 +315,111 @@ async def test_mock_ibm_timeout_fallback():
             assert res["risk"] == "HIGH"
             assert "connection_status" in res["technical_details"]
 
+
+def test_input_lane_1_cannot_produce_lane_3():
+    """Proves that input lane 1 with generic road debris vision cannot produce 'lane 3' and falls back to safe MEDIUM risk."""
+    payload = {
+        "vehicle_id": "CAR_A",
+        "speed": "30 mph",
+        "current_lane": "1",
+        "target_lane": "1",
+        "direction": "EAST",
+        "intended_maneuver": "KEEP_LANE",
+        "source_vehicle": "CAR_B",
+        "observation": "Road debris detected. Observation confidence: 94%.",
+    }
+    response = client.post("/api/assess", json=payload)
+    assert response.status_code == 200
+    res = response.json()
+
+    # Rule 1 & 2: Input lane 1 cannot produce 'lane 3' in warning, hazard, or reason
+    assert "lane 3" not in res.get("warning", "").lower()
+    assert "lane 3" not in res.get("hazard", "").lower()
+    assert "lane 3" not in res.get("reason", "").lower()
+
+    # Rule 5: If the hazard's lane/path relevance is unknown, return safe generic message
+    assert res["risk"] == "MEDIUM"
+    assert "debris" in res["hazard"].lower()
+    assert "proceed cautiously" in res["warning"].lower()
+    assert "not established" in res["reason"].lower()
+    assert "CAR_A" in res["recipients"]
+
+
+def test_validation_removes_unsupported_lane_from_ibm_output():
+    """Validates that backend validation step eliminates unsupported lane 3 even if produced by IBM."""
+    from orchestrate import validate_assessment
+
+    raw_ibm_assessment = {
+        "risk": "HIGH",
+        "hazard": "Road debris ahead in lane 3",
+        "warning": "Debris ahead in lane 3 - remain in current lane.",
+        "reason": "Intended lane change intersects road obstacle.",
+        "recipients": ["CAR_A"],
+        "confidence": "HIGH",
+    }
+    vehicle_context = {
+        "vehicle_id": "CAR_A",
+        "speed": "30 mph",
+        "current_lane": "1",
+        "target_lane": "1",
+        "direction": "EAST",
+        "intended_maneuver": "KEEP_LANE",
+    }
+    road_obs = "Road debris detected. Observation confidence: 94%."
+
+    validated = validate_assessment(raw_ibm_assessment, vehicle_context, road_obs)
+    assert "lane 3" not in validated["warning"].lower()
+    assert "lane 3" not in validated["hazard"].lower()
+    assert "lane 3" not in validated["reason"].lower()
+    assert validated["risk"] == "MEDIUM"
+    assert "Road debris detected" in validated["hazard"]
+    assert "proceed cautiously" in validated["warning"].lower()
+    assert "Exact lane/path relationship is not established." in validated["reason"]
+    assert validated["recipients"] == ["CAR_A"]
+
+
+def test_debris_ahead_on_travel_lane_is_high_risk():
+    """Validates that road debris reported directly ahead on the travel lane produces HIGH risk."""
+    payload = {
+        "vehicle_id": "CAR_A",
+        "speed": "65 mph",
+        "current_lane": "2",
+        "target_lane": "2",
+        "direction": "EAST",
+        "intended_maneuver": "KEEP_LANE",
+        "source_vehicle": "CAR_A",
+        "observation": "Road debris and surface obstruction reported ahead on the travel lane. (5 frames sampled from video)",
+    }
+    response = client.post("/api/assess", json=payload)
+    assert response.status_code == 200
+    res = response.json()
+    assert res["risk"] == "HIGH"
+    assert "lane 3" not in res["warning"].lower()
+    assert "lane 3" not in res["reason"].lower()
+    assert "travel lane" in res["warning"].lower() or "reduce speed" in res["warning"].lower()
+    assert "travel path" in res["reason"].lower() or "obstruction" in res["reason"].lower()
+    assert res["recipients"] == ["CAR_A"]
+
+
+def test_debris_on_other_side_is_low_risk():
+    """Proves that road debris on the other side of a divided road yields LOW risk and recipient NONE."""
+    payload = {
+        "vehicle_id": "CAR_A",
+        "speed": "30 mph",
+        "current_lane": "2",
+        "target_lane": "2",
+        "direction": "EAST",
+        "intended_maneuver": "KEEP_LANE",
+        "source_vehicle": "CAR_B",
+        "observation": "Road debris and surface obstruction reported on the other side of the divided highway across the median barrier.",
+    }
+    response = client.post("/api/assess", json=payload)
+    assert response.status_code == 200
+    res = response.json()
+    assert res["risk"] == "LOW"
+    assert "other side" in res["warning"].lower() or "no action" in res["warning"].lower()
+    assert res["recipients"] == [] or "NONE" in res["recipients"]
+
+
+
+

@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from orchestrate import OrchestrateClient
+from orchestrate import OrchestrateClient, validate_assessment
 from scenarios import BENCHMARK_SCENARIOS
 from vision import vision_analyzer
 
@@ -224,6 +224,9 @@ async def assess(
     except Exception as exc:
         logger.error("Error during hazard assessment: %s", exc)
         raise HTTPException(status_code=500, detail="Hazard assessment failed.")
+
+    # Backend validation step before returning
+    assessment = validate_assessment(assessment, vehicle_context, obs_text)
 
     # Attach observation and vision metadata to response
     assessment["observation_used"] = obs_text

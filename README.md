@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
 [![IBM watsonx](https://img.shields.io/badge/IBM_watsonx-Orchestrate-052FAD.svg?logo=ibm)](https://www.ibm.com/products/watsonx-orchestrate)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests Passing](https://img.shields.io/badge/Tests-41%20Passed-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-45%20Passed-brightgreen.svg)]()
 
 ---
 
@@ -126,7 +126,7 @@ Open your browser at: **[http://localhost:8000](http://localhost:8000)**
 
 ## 🧪 Testing
 
-The repository includes a comprehensive 41-test automated suite covering API endpoints, IAM token caching, response parsing, video sampling, and all 20 benchmark scenarios:
+The repository includes a comprehensive 45-test automated suite covering API endpoints, IAM token caching, response parsing, video sampling, and all 20 benchmark scenarios:
 
 ```bash
 PYTHONPATH=. pytest -v
@@ -134,11 +134,11 @@ PYTHONPATH=. pytest -v
 
 Output:
 ```text
-tests/test_api.py ...............                                        [ 36%]
-tests/test_parser.py .....                                               [ 48%]
+tests/test_api.py ...................                                    [ 42%]
+tests/test_parser.py .....                                               [ 53%]
 tests/test_scenarios.py .....................                            [100%]
 
-======================== 41 passed, 1 warning in 3.12s =========================
+======================== 45 passed, 1 warning in 11.95s ========================
 ```
 
 ---

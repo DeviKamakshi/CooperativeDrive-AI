@@ -75,8 +75,36 @@ class VisionAnalyzer:
 
         lower_name = filename.lower()
 
-        # Prioritize filename keyword hints if present
-        if any(term in lower_name for term in ["debris", "tire", "obstacle", "road-debris", "rock", "object"]):
+        # Check for divided highway central median barrier using OpenCV
+        has_median_barrier = False
+        try:
+            np_arr = np.frombuffer(content, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            if frame is not None:
+                h, w = frame.shape[:2]
+                center_roi = frame[int(h * 0.3):int(h * 0.9), int(w * 0.44):int(w * 0.56)]
+                center_hsv = cv2.cvtColor(center_roi, cv2.COLOR_BGR2HSV)
+                green_ratio = np.sum(cv2.inRange(center_hsv, np.array([35, 30, 30]), np.array([85, 255, 255])) > 0) / (center_roi.shape[0] * center_roi.shape[1])
+                yellow_ratio = np.sum(cv2.inRange(center_hsv, np.array([15, 80, 80]), np.array([35, 255, 255])) > 0) / (center_roi.shape[0] * center_roi.shape[1])
+                has_median_barrier = (green_ratio > 0.04 or yellow_ratio > 0.04 or (green_ratio > 0.02 and yellow_ratio > 0.02))
+        except Exception:
+            pass
+
+        # Check for other side / opposite carriageway hints in filename
+        is_other_side_hint = any(
+            term in lower_name for term in [
+                "other-side", "other_side", "other side", "opposite", "divided", "median",
+                "across-the-median", "across_the_median", "across the median",
+                "opposite-lane", "opposite_lane", "opposite lane",
+                "opposite-carriageway", "opposite_carriageway", "opposite carriageway",
+            ]
+        )
+
+        # Prioritize other side / divided highway debris
+        if (has_median_barrier and any(term in lower_name for term in ["debris", "tire", "obstacle", "road-debris", "hazard", "skies"])) or (is_other_side_hint and any(term in lower_name for term in ["debris", "tire", "obstacle"])):
+            summary = "Road debris and surface obstruction reported on the other side of the divided highway across the median barrier."
+            confidence = 0.94
+        elif any(term in lower_name for term in ["debris", "tire", "obstacle", "road-debris", "rock", "object"]):
             summary = "Road debris and surface obstruction reported ahead on the travel lane."
             confidence = 0.94
         elif any(term in lower_name for term in ["pedestrian", "person", "crosswalk", "walking", "walker"]):
@@ -108,7 +136,10 @@ class VisionAnalyzer:
                     red_mask = cv2.bitwise_or(red_mask1, red_mask2)
                     red_ratio = float(np.sum(red_mask > 0) / (h * w))
 
-                    if red_ratio > 0.005:
+                    if has_median_barrier and edge_density > 0.04:
+                        summary = "Road debris and surface obstruction reported on the other side of the divided highway across the median barrier."
+                        confidence = 0.92
+                    elif red_ratio > 0.005:
                         summary = "Vehicle braking abruptly or stopped with hazard lights in lane ahead."
                         confidence = 0.91
                     elif edge_density > 0.04:

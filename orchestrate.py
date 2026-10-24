@@ -141,7 +141,7 @@ def build_agent_prompt(
         f"1. Path Conflict: Obstacles (debris, pedestrian entering road, cyclist, stopped car, construction) intersecting {vehicle_id}'s lane or maneuver -> RISK: HIGH.\n"
         f"2. Merging & Intersections: Critical Time-to-Conflict (< 3s) or simultaneous lane change -> RISK: HIGH. Safe merge (gap >= 4s) -> RISK: LOW.\n"
         f"3. Occluded Hazards: Curve, blind intersection, fog, oncoming vehicle during overtake -> RISK: HIGH.\n"
-        f"4. Irrelevant Hazards: Opposite direction, already passed, or pedestrian safe on sidewalk not entering road -> RISK: LOW, SEND TO: NONE.\n"
+        f"4. Irrelevant Hazards: Opposite direction, other side of divided highway across median barrier, already passed, or pedestrian safe on sidewalk not entering road -> RISK: LOW, SEND TO: NONE.\n"
         f"5. Conflicting Reports: One vehicle reports hazard and another reports clear -> RISK: MEDIUM, proceed cautiously.\n"
         f"6. Multi-Vehicle Confirmation: Multiple independent vehicles confirm hazard -> RISK: HIGH, CONFIDENCE: HIGH.\n"
         f"7. Emergency Vehicle: Emergency vehicle approaching -> Awareness warning to yield safely.\n\n"
@@ -217,6 +217,146 @@ def parse_ibm_response(raw_text: str, default_recipient: str = "CAR_A") -> Dict[
             result["recipients"] = [default_recipient]
 
     return result
+
+
+def validate_assessment(
+    assessment: Dict[str, Any],
+    vehicle_context: Dict[str, Any],
+    road_observation: str,
+) -> Dict[str, Any]:
+    """Validates and sanitizes hazard assessment against trusted vehicle and road observation inputs.
+
+    Rules enforced:
+    1. Never invent lane, speed, direction, distance, GPS, TTC, trajectory, or vehicle ID.
+    2. Only use these values if explicitly present in trusted vehicle/road input.
+    3. Vision may identify a hazard and confidence, but must not invent its exact lane or direction.
+    4. If IBM or the fallback returns unsupported information, remove it.
+    5. If the hazard's lane/path relevance is unknown, return a safe generic message:
+       RISK: MEDIUM
+       HAZARD: Road debris detected
+       WARNING: Road debris detected - proceed cautiously.
+       REASON: Exact lane/path relationship is not established.
+       SEND TO: CAR_A
+    6. Apply the same rule to both live IBM output and offline fallback.
+    """
+    if not assessment:
+        return assessment
+
+    # Preserve established LOW risk (safe clear road or irrelevant opposite-direction hazard)
+    if assessment.get("risk") == "LOW":
+        return assessment
+
+    obs_lower = road_observation.lower()
+
+    # If observation indicates hazard on the other side or opposite carriageway, it is irrelevant to CAR_A
+    if any(k in obs_lower for k in [
+        "other side", "opposite side", "opposite carriageway", "other carriageway",
+        "across the median", "across the barrier", "opposite direction", "already passed"
+    ]):
+        assessment["risk"] = "LOW"
+        assessment["hazard"] = "Irrelevant hazard on opposite / other side"
+        assessment["warning"] = "Road clear for your trajectory - hazard is on the other side."
+        assessment["reason"] = "Hazard is located on the other side / opposite carriageway across the median."
+        assessment["recipients"] = []
+        return assessment
+
+    vehicle_id = str(vehicle_context.get("vehicle_id") or "CAR_A").strip()
+    curr_lane = str(vehicle_context.get("current_lane") or "").strip()
+    tgt_lane = str(vehicle_context.get("target_lane") or curr_lane).strip()
+    maneuver = str(vehicle_context.get("intended_maneuver") or "KEEP_LANE").strip().upper()
+
+    # Collect trusted lanes explicitly present in trusted vehicle context or road observation
+    trusted_lanes = set()
+    if curr_lane:
+        trusted_lanes.add(curr_lane)
+    if tgt_lane:
+        trusted_lanes.add(tgt_lane)
+    for m in re.finditer(r"\blane\s*(\d+)\b", road_observation, re.IGNORECASE):
+        trusted_lanes.add(m.group(1))
+
+    # Identify any lanes mentioned in assessment fields
+    mentioned_lanes = set()
+    for field in ("hazard", "warning", "reason"):
+        val = assessment.get(field)
+        if isinstance(val, str):
+            for m in re.finditer(r"\blane\s*(\d+)\b", val, re.IGNORECASE):
+                mentioned_lanes.add(m.group(1))
+
+    unsupported_lanes = mentioned_lanes - trusted_lanes
+
+    # Rule 5: Check whether hazard's lane/path relevance is unknown
+    haz_str = str(assessment.get("hazard", "")).lower()
+    obs_lower = road_observation.lower()
+    is_debris_hazard = any(k in haz_str or k in obs_lower for k in ["debris", "tire", "obstacle", "surface obstruction"])
+    is_on_travel_path = (
+        any(k in obs_lower for k in ["travel lane", "travel path", "ahead on", "ahead in", "in path", "directly ahead"])
+        or (bool(curr_lane) and f"lane {curr_lane}" in obs_lower)
+    )
+
+    if unsupported_lanes:
+        if is_debris_hazard:
+            if is_on_travel_path:
+                assessment["risk"] = "HIGH"
+                assessment["hazard"] = "Road debris ahead"
+                assessment["warning"] = "Road debris ahead on travel lane - reduce speed."
+                assessment["reason"] = "Surface obstruction detected directly ahead in vehicle travel path."
+                assessment["recipients"] = [vehicle_id] if vehicle_id else ["CAR_A"]
+            else:
+                assessment["risk"] = "MEDIUM"
+                assessment["hazard"] = "Road debris detected"
+                assessment["warning"] = "Road debris detected - proceed cautiously."
+                assessment["reason"] = "Exact lane/path relationship is not established."
+                assessment["recipients"] = [vehicle_id] if vehicle_id else ["CAR_A"]
+        else:
+            assessment["risk"] = "MEDIUM"
+            clean_haz = assessment.get("hazard", "Hazard detected")
+            for unsupp_lane in unsupported_lanes:
+                clean_haz = re.sub(
+                    rf"(?i)\s*(?:in\s+)?lane\s*{re.escape(unsupp_lane)}\b",
+                    "",
+                    clean_haz,
+                ).strip()
+            assessment["hazard"] = clean_haz or "Hazard detected"
+            assessment["warning"] = f"{assessment['hazard']} - proceed cautiously."
+            assessment["reason"] = "Exact lane/path relationship is not established."
+            assessment["recipients"] = [vehicle_id] if vehicle_id else ["CAR_A"]
+
+    # Rule 4: Remove any remaining unsupported lane references from all text fields
+    for unsupp_lane in unsupported_lanes:
+        pattern = re.compile(rf"(?i)\s*(?:in\s+)?lane\s*{re.escape(unsupp_lane)}\b")
+        for field in ("hazard", "warning", "reason"):
+            if isinstance(assessment.get(field), str):
+                assessment[field] = pattern.sub("", assessment[field]).strip()
+
+    # If debris is in travel path, ensure it is assessed as HIGH risk rather than generic MEDIUM
+    if is_debris_hazard and is_on_travel_path:
+        if assessment.get("risk") == "MEDIUM" and "exact lane/path" in str(assessment.get("reason", "")).lower():
+            assessment["risk"] = "HIGH"
+            assessment["hazard"] = "Road debris ahead"
+            assessment["warning"] = "Road debris ahead on travel lane - reduce speed."
+            assessment["reason"] = "Surface obstruction detected directly ahead in vehicle travel path."
+            assessment["recipients"] = [vehicle_id] if vehicle_id else ["CAR_A"]
+
+    # Rule 1 & 2: Filter recipients to only trusted vehicle IDs
+    trusted_vehicles = {vehicle_id.upper()}
+    if vehicle_context.get("source_vehicle"):
+        trusted_vehicles.add(str(vehicle_context.get("source_vehicle")).strip().upper())
+    for m in re.finditer(r"\b(CAR_[A-Z0-9]+)\b", road_observation, re.IGNORECASE):
+        trusted_vehicles.add(m.group(1).upper())
+
+    if assessment.get("recipients"):
+        assessment["recipients"] = [
+            r for r in assessment["recipients"]
+            if r.upper() in trusted_vehicles
+        ]
+
+    # Rule 1: Trajectory consistency
+    if curr_lane == tgt_lane and maneuver in ("KEEP_LANE", ""):
+        reason_str = str(assessment.get("reason", ""))
+        if "intended lane change" in reason_str.lower():
+            assessment["reason"] = "Exact lane/path relationship is not established."
+
+    return assessment
 
 
 class OrchestrateClient:
@@ -321,7 +461,7 @@ class OrchestrateClient:
         self.last_status = connection_status
         parsed = parse_ibm_response(raw_response, default_recipient=recipient)
 
-        return {
+        raw_assessment = {
             "risk": parsed["risk"],
             "hazard": parsed["hazard"],
             "warning": parsed["warning"],
@@ -336,6 +476,9 @@ class OrchestrateClient:
                 "target_vehicle": recipient,
             },
         }
+
+        # Backend validation step before returning
+        return validate_assessment(raw_assessment, vehicle_context, road_observation)
 
     def _fallback_reasoning(
         self,
@@ -354,13 +497,25 @@ class OrchestrateClient:
         # -------------------------------------------------------------
         # Scenario 15: Hazard irrelevant to this vehicle (Recipient filtering)
         # -------------------------------------------------------------
-        if ("opposite direction" in obs or "already passed" in obs or "passed the reported" in obs or
-            ("eastbound" in obs and direction == "WEST") or ("westbound" in obs and direction == "EAST")):
+        if (
+            "opposite direction" in obs
+            or "other side" in obs
+            or "opposite side" in obs
+            or "opposite carriageway" in obs
+            or "other carriageway" in obs
+            or "across the median" in obs
+            or "across the barrier" in obs
+            or "opposite lane" in obs
+            or "already passed" in obs
+            or "passed the reported" in obs
+            or ("eastbound" in obs and direction == "WEST")
+            or ("westbound" in obs and direction == "EAST")
+        ):
             return (
                 f"RISK: LOW\n"
-                f"HAZARD: Irrelevant hazard on opposite / past road\n"
-                f"WARNING: Road clear for your trajectory - no action required.\n"
-                f"REASON: Hazard is located in opposite carriageway or already passed.\n"
+                f"HAZARD: Irrelevant hazard on opposite / other side\n"
+                f"WARNING: Road clear for your trajectory - hazard is on the other side.\n"
+                f"REASON: Hazard is located on the other side / opposite carriageway across the median.\n"
                 f"SEND TO: NONE\n"
                 f"CONFIDENCE: HIGH"
             )
@@ -625,17 +780,37 @@ class OrchestrateClient:
             )
 
         # -------------------------------------------------------------
-        # Scenario 1: Road debris during lane change
+        # Scenario 1: Road debris during lane change or travel lane
         # -------------------------------------------------------------
-        if "debris" in obs or "tire" in obs or "obstacle" in obs or "object" in obs:
-            return (
-                f"RISK: HIGH\n"
-                f"HAZARD: Road debris ahead\n"
-                f"WARNING: Debris ahead in lane 3 - remain in current lane.\n"
-                f"REASON: Intended lane change intersects road obstacle.\n"
-                f"SEND TO: {vehicle_id}\n"
-                f"CONFIDENCE: HIGH"
-            )
+        if "debris" in obs or "tire" in obs or "obstacle" in obs or "object" in obs or "obstruction" in obs:
+            if tgt_lane and f"lane {tgt_lane}" in obs and maneuver in ("CHANGE_RIGHT", "CHANGE_LEFT"):
+                return (
+                    f"RISK: HIGH\n"
+                    f"HAZARD: Road debris ahead\n"
+                    f"WARNING: Debris ahead in lane {tgt_lane} - remain in current lane.\n"
+                    f"REASON: Intended lane change intersects road obstacle.\n"
+                    f"SEND TO: {vehicle_id}\n"
+                    f"CONFIDENCE: HIGH"
+                )
+            elif (curr_lane and f"lane {curr_lane}" in obs) or "travel lane" in obs or "travel path" in obs or "ahead in lane" in obs or "on travel lane" in obs:
+                lane_desc = f"in lane {curr_lane}" if (curr_lane and f"lane {curr_lane}" in obs) else "on travel lane"
+                return (
+                    f"RISK: HIGH\n"
+                    f"HAZARD: Road debris ahead\n"
+                    f"WARNING: Road debris ahead {lane_desc} - reduce speed.\n"
+                    f"REASON: Surface obstruction detected directly ahead in vehicle travel path.\n"
+                    f"SEND TO: {vehicle_id}\n"
+                    f"CONFIDENCE: HIGH"
+                )
+            else:
+                return (
+                    f"RISK: MEDIUM\n"
+                    f"HAZARD: Road debris detected\n"
+                    f"WARNING: Road debris detected - proceed cautiously.\n"
+                    f"REASON: Exact lane/path relationship is not established.\n"
+                    f"SEND TO: {vehicle_id}\n"
+                    f"CONFIDENCE: HIGH"
+                )
 
         # -------------------------------------------------------------
         # Scenario 20: Completely safe road / clear
