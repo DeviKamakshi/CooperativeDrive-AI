@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CooperativeDrive AI — Connected Vehicle Safety</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🚗</span>
+        <h1>CooperativeDrive AI</h1>
+      </div>
+      <div id="connectionPill" class="connection-pill connected" title="IBM watsonx Orchestrate Connected">
+        <span class="status-dot"></span>
+        <span id="connectionText">IBM WATSON ● CONNECTED</span>
+      </div>
+
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="main-card">
+      <!-- Benchmark Scenarios Selector (20 Scenarios) -->
+      <div class="benchmark-suite-card">
+        <div class="suite-header-row">
+          <span class="suite-title">⚡ 20 BENCHMARK SAFETY SCENARIOS</span>
+          <span id="scenarioExpectedBadge" class="expected-badge">Choose a scenario to auto-populate vehicle & observation</span>
+        </div>
+        <div class="scenario-select-row">
+          <select id="scenarioSelector" class="scenario-dropdown" title="Select from 20 Benchmark Scenarios">
+            <option value="" disabled selected>— Choose from 20 Connected-Vehicle Safety Scenarios —</option>
+            <optgroup label="🚗 Obstacles & Maneuver Conflicts">
+              <option value="1">1. Road debris during lane change (Expected: HIGH)</option>
+              <option value="2">2. Hidden pedestrian during right turn (Expected: HIGH)</option>
+              <option value="3">3. Hidden cyclist during lane change (Expected: HIGH)</option>
+              <option value="10">10. Stopped vehicle around a curve (Expected: HIGH)</option>
+              <option value="18">18. Highway exit blocked (Expected: HIGH)</option>
+              <option value="19">19. Overtaking conflict (Expected: HIGH)</option>
+            </optgroup>
+            <optgroup label="🛣️ Merging & Intersections">
+              <option value="4">4. Highway merge conflict — TTC 1.4s (Expected: HIGH)</option>
+              <option value="5">5. Safe highway merge — 6s gap (Expected: LOW)</option>
+              <option value="6">6. Simultaneous lane change (Expected: HIGH)</option>
+              <option value="7">7. Blind intersection — 2.1s arrival (Expected: HIGH)</option>
+            </optgroup>
+            <optgroup label="🚦 Dynamic & Environmental Hazards">
+              <option value="8">8. Sudden braking ahead occluded (Expected: HIGH)</option>
+              <option value="9">9. Wrong-way vehicle approaching (Expected: HIGH)</option>
+              <option value="11">11. Construction / lane closure (Expected: HIGH)</option>
+              <option value="12">12. Emergency vehicle approaching (Expected: MEDIUM)</option>
+              <option value="17">17. Poor visibility + hidden stopped traffic (Expected: HIGH)</option>
+            </optgroup>
+            <optgroup label="🧠 Responsible AI & Edge Cases">
+              <option value="13">13. Conflicting reports — Responsible AI (Expected: MEDIUM)</option>
+              <option value="14">14. Multiple vehicles confirm hazard (Expected: HIGH)</option>
+              <option value="15">15. Hazard irrelevant to this vehicle (Expected: LOW / No Warning)</option>
+              <option value="16">16. Pedestrian on sidewalk — No path conflict (Expected: LOW)</option>
+              <option value="20">20. Completely safe road (Expected: LOW)</option>
+            </optgroup>
+          </select>
+        </div>
+      </div>
+
+      <!-- Road Observation Section -->
+      <section class="section-block">
+        <div class="section-title-row">
+          <label class="section-label" for="observationInput">ROAD OBSERVATION</label>
+          <span class="source-tag">Source: <input type="text" id="sourceVehicle" class="input-inline" value="CAR_B" title="Observation Source Vehicle"></span>
+        </div>
+
+        <textarea id="observationInput" class="textarea-obs" rows="3" placeholder="Enter road observation text, click a Quick Scenario above, or upload a road image below..."></textarea>
+
+        <!-- Media Upload Zone (Video & Image) -->
+        <div class="upload-zone" id="uploadDropZone">
+          <div class="upload-buttons-row">
+            <label for="videoInput" class="btn-upload btn-upload-video">
+              <span class="upload-icon">🎥</span>
+              <span id="videoBtnText">UPLOAD VIDEO (MP4, WebM, MOV)</span>
+            </label>
+            <input type="file" id="videoInput" accept="video/mp4,video/webm,video/quicktime,video/*,.mp4,.mov,.webm,.m4v,.avi,.mkv" style="display:none;">
+
+            <label for="imageInput" class="btn-upload btn-upload-image">
+              <span class="upload-icon">📷</span>
+              <span id="imageBtnText">UPLOAD IMAGE</span>
+            </label>
+            <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp,image/*,.jpg,.jpeg,.png,.webp" style="display:none;">
+
+            <button type="button" id="sampleVideoBtn" class="btn-sample-video" title="Load synthetic dashcam road video clip">
+              <span>🎬 Load Sample Video</span>
+            </button>
+
+            <button type="button" id="clearImageBtn" class="btn-clear-img" style="display:none;">✕ Remove</button>
+          </div>
+          <div class="drop-hint">or drag & drop road video / photo directly here</div>
+        </div>
+
+        <!-- Media Preview Box -->
+        <div id="imagePreviewContainer" class="image-preview-container" style="display:none;">
+          <img id="imagePreview" alt="Road Observation Image Preview" class="preview-img" style="display:none;">
+          <video id="videoPreview" controls autoplay muted loop playsinline class="preview-video" style="display:none;"></video>
+          <div id="visionMetaBadge" class="vision-badge"></div>
+        </div>
+
+        <!-- Video Frame Sampling Timeline -->
+        <div id="videoTimelineContainer" class="video-timeline-container" style="display:none;">
+          <div class="timeline-header">SAMPLING TIMELINE (1 frame every 2s):</div>
+          <div id="videoTimelineChips" class="timeline-chips"></div>
+        </div>
+      </section>
+
+
+      <!-- Vehicle Context Section -->
+      <section class="section-block context-section">
+        <label class="section-label">VEHICLE CONTEXT</label>
+        <div class="context-grid">
+          <div class="field-group">
+            <span class="field-label">Vehicle ID</span>
+            <input type="text" id="vehicleId" class="input-text" value="CAR_A">
+          </div>
+          <div class="field-group">
+            <span class="field-label">Speed</span>
+            <input type="text" id="vehicleSpeed" class="input-text" value="30 mph">
+          </div>
+          <div class="field-group">
+            <span class="field-label">Current Lane</span>
+            <input type="number" id="currentLane" class="input-text" value="2" min="1" max="8">
+          </div>
+          <div class="field-group">
+            <span class="field-label">Target Lane</span>
+            <input type="number" id="targetLane" class="input-text" value="2" min="1" max="8">
+          </div>
+          <div class="field-group">
+            <span class="field-label">Direction</span>
+            <input type="text" id="vehicleDirection" class="input-text" value="EAST">
+          </div>
+          <div class="field-group field-span-full">
+            <span class="field-label">Intended Maneuver</span>
+            <select id="intendedManeuver" class="input-select">
+              <option value="KEEP_LANE">KEEP_LANE</option>
+              <option value="CHANGE_LEFT">CHANGE_LEFT</option>
+              <option value="CHANGE_RIGHT">CHANGE_RIGHT</option>
+              <option value="MERGE">MERGE</option>
+              <option value="EXIT">EXIT</option>
+              <option value="TURN_LEFT">TURN_LEFT</option>
+              <option value="TURN_RIGHT" selected>TURN_RIGHT</option>
+              <option value="ENTER_INTERSECTION">ENTER_INTERSECTION</option>
+              <option value="OVERTAKE">OVERTAKE</option>
+              <option value="REVERSE">REVERSE</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Action Button -->
+      <div class="action-row">
+        <button type="button" id="assessBtn" class="btn-assess">
+          <span id="assessBtnText">ASSESS RISK</span>
+        </button>
+      </div>
+
+      <!-- Loading Indicator -->
+      <div id="loadingIndicator" class="loading-state" style="display:none;">
+        <div class="spinner"></div>
+        <span>Analyzing road situation...</span>
+      </div>
+
+      <!-- Risk Assessment Results Display -->
+      <section id="resultCard" class="result-card" style="display:none;">
+        <div id="riskBanner" class="risk-banner">
+          <div class="risk-header-row">
+            <span id="riskBadge" class="badge-risk">HIGH RISK</span>
+            <span id="confidenceBadge" class="badge-conf">CONFIDENCE: HIGH</span>
+          </div>
+          <h2 id="hazardTitle" class="hazard-title">PEDESTRIAN AHEAD</h2>
+          <p id="warningText" class="warning-text">Wait before turning right.</p>
+        </div>
+
+        <div class="result-body">
+          <div class="result-section">
+            <span class="result-caption">WHY?</span>
+            <p id="reasonText" class="result-detail">Pedestrian partially hidden behind truck.</p>
+          </div>
+
+          <div class="result-section">
+            <span class="result-caption">WARNING SENT TO</span>
+            <div id="recipientsList" class="recipients-tags">
+              <span class="tag-vehicle">CAR_A</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Technical Details (Collapsed by default) -->
+        <details class="tech-details" id="techDetails">
+          <summary class="tech-summary">Technical Details</summary>
+          <div class="tech-content">
+            <div class="tech-item">
+              <span class="tech-key">Observation Sent to IBM:</span>
+              <pre id="techObsSent" class="code-block"></pre>
+            </div>
+            <div class="tech-item">
+              <span class="tech-key">Raw IBM Response:</span>
+              <pre id="techRawResp" class="code-block"></pre>
+            </div>
+            <div class="tech-grid">
+              <div><span class="tech-key">Parsed Risk:</span> <strong id="techParsedRisk"></strong></div>
+              <div><span class="tech-key">Recipient:</span> <strong id="techRecipient"></strong></div>
+              <div><span class="tech-key">Confidence:</span> <strong id="techConfidence"></strong></div>
+              <div><span class="tech-key">Connection:</span> <strong id="techConnection"></strong></div>
+            </div>
+          </div>
+        </details>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
