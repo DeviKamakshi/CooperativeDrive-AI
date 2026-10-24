@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CooperativeDrive AI</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header id="header">
+    <div class="header-title">
+      <span class="logo">⬡</span>
+      CooperativeDrive AI
+    </div>
+    <div class="header-badges">
+      <span class="badge badge-synthetic">SIMULATED DATA</span>
+      <span id="wx-text-status" class="badge badge-info">watsonx: connecting…</span>
+      <span id="wx-vision-status" class="badge badge-info">Vision: connecting…</span>
+    </div>
+  </header>
+
+  <!-- Simulated data notice banner (always visible) -->
+  <div class="banner banner-notice">
+    [SIMULATED DATA] All vehicle telemetry is synthetic. This is a research prototype.
+  </div>
+
+  <!-- Fallback banners (hidden until needed) -->
+  <div id="banner-vision" class="banner banner-warning" style="display:none">
+    Vision analysis using scenario data (watsonx Vision unavailable)
+  </div>
+  <div id="banner-explanation" class="banner banner-warning" style="display:none">
+    AI explanation unavailable — deterministic safety system remains active
+  </div>
+
+  <!-- Scenario selector -->
+  <section id="scenario-selector">
+    <div class="scenario-buttons" id="scenario-buttons">
+      <!-- Populated by JS -->
+    </div>
+  </section>
+
+  <!-- Main 3-column grid -->
+  <main class="main-grid">
+
+    <!-- Bird's-eye map -->
+    <section id="map-panel" class="panel">
+      <h2>Bird's-Eye View <span class="badge badge-telemetry">TELEMETRY-DERIVED</span></h2>
+      <canvas id="map-canvas" width="500" height="400"></canvas>
+      <div class="map-legend">
+        <span class="legend-dot" style="background:#3b82f6"></span> Ego (A)
+        <span class="legend-dot" style="background:#16a34a"></span> Vehicle B
+        <span class="legend-dot" style="background:#d97706"></span> Vehicle C
+        <span class="legend-dot" style="background:#7c5cd8"></span> Vehicle D
+        <span class="legend-dot" style="background:#dc2626"></span> Hazard
+      </div>
+    </section>
+
+    <!-- Camera + vehicle state -->
+    <section id="camera-panel" class="panel">
+      <h2>Camera View <span class="badge badge-vision">VISION-DERIVED</span></h2>
+      <div id="camera-image-container">
+        <img id="camera-image" src="" alt="No image available" style="display:none"/>
+        <div id="camera-placeholder">No camera image for this scenario</div>
+      </div>
+      <div id="scene-description" class="scene-desc"></div>
+
+      <h3>Vehicle State <span class="badge badge-telemetry">TELEMETRY-DERIVED</span></h3>
+      <div id="vehicle-state-table"></div>
+    </section>
+
+    <!-- Risk + explanation -->
+    <section id="risk-panel" class="panel">
+      <h2>Risk Assessment</h2>
+      <div id="risk-level-display" class="risk-level risk-low">LOW</div>
+      <div id="risk-confidence" class="risk-meta"></div>
+      <div id="risk-ttc" class="risk-meta"></div>
+      <div id="risk-reasons" class="risk-reasons"></div>
+      <div id="risk-recommendation" class="risk-recommendation"></div>
+
+      <h3>AI Explanation</h3>
+      <div id="risk-explanation" class="explanation-text">Awaiting scenario…</div>
+      <div id="explanation-source-badge" class="explanation-source"></div>
+
+      <div class="responsible-ai-note">
+        ⚠ Human driver remains responsible. This system provides awareness only — it does not control the vehicle.
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Communications log -->
+  <section id="comms-panel" class="panel">
+    <h2>Cooperative Communications <span class="badge badge-telemetry">TELEMETRY-DERIVED</span></h2>
+    <div id="comms-log" class="comms-scroll"></div>
+  </section>
+
+  <!-- Hazard registry -->
+  <section id="hazard-panel" class="panel">
+    <h2>Hazard Registry</h2>
+    <div class="table-scroll">
+      <table id="hazard-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Source Vehicle</th>
+            <th>Lane</th>
+            <th>Confidence</th>
+            <th>Age</th>
+            <th>Confirms / Conflicts</th>
+            <th>Status</th>
+            <th>Info Type</th>
+          </tr>
+        </thead>
+        <tbody id="hazard-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script src="/static/js/map.js"></script>
+  <script src="/static/js/panels.js"></script>
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
